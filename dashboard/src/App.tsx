@@ -1,221 +1,91 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import {
-  Header,
-  BalanceCards,
-  PnLPanel,
-  RiskPanel,
-  TrendIndicators,
-  StrategyGrid,
-  OnChainStats,
-  ActivityLog,
-  ConfigPanel,
-  ConnectionStatus,
-  ConfirmModal,
-  DipArbPanel,
-  ArbitragePanel,
-  SmartMoneyPanel,
-  QuickStats,
-  SessionSummary,
-  HistoryPage,
-  PositionsPage,
-  StrategyControls,
-  type ConfirmConfig,
+  Header, BalanceCards, PnLPanel, RiskPanel, TrendIndicators, StrategyGrid,
+  OnChainStats, ActivityLog, ConfigPanel, ConnectionStatus, ConfirmModal,
+  DipArbPanel, ArbitragePanel, SmartMoneyPanel, QuickStats, SessionSummary,
+  HistoryPage, PositionsPage, StrategyControls, type ConfirmConfig,
 } from './components';
 
-type Page = 'dashboard' | 'history' | 'positions';
+type Page = 'overview' | 'history' | 'positions';
+
+function formatUsd(value = 0) {
+  return `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`;
+}
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>('overview');
   const { state, config, logs, connected, error, commandError, sendCommand } = useWebSocket();
+  const [confirmState, setConfirmState] = useState<(ConfirmConfig & { resolve: (value: boolean) => void }) | null>(null);
   const isDryRun = config?.dryRun ?? true;
-  const isHalted = state?.permanentlyHalted ?? false;
+  const halted = state?.permanentlyHalted ?? false;
+  const pnl = state?.totalPnL ?? 0;
+  const exposure = state?.totalExposureUsd ?? 0;
+  const exposureCap = (config?.capital.totalUsd ?? 0) * (config?.capital.maxTotalExposurePct ?? 0);
+  const winRate = useMemo(() => {
+    const wins = state?.wins ?? 0;
+    const losses = state?.losses ?? 0;
+    return wins + losses ? (wins / (wins + losses)) * 100 : 0;
+  }, [state?.wins, state?.losses]);
 
-  // Promise-based confirmation dialog (replaces window.confirm)
-  const [confirmState, setConfirmState] = useState<(ConfirmConfig & { resolve: (v: boolean) => void }) | null>(null);
-  const confirmDialog = (cfg: ConfirmConfig) =>
-    new Promise<boolean>((resolve) => setConfirmState({ ...cfg, resolve }));
+  const confirm = (cfg: ConfirmConfig) => new Promise<boolean>((resolve) => setConfirmState({ ...cfg, resolve }));
+  const toggleStrategy = (strategy: string, enabled: boolean) => sendCommand('toggleStrategy', { strategy, enabled });
 
-  const handleClosePosition = (tokenId: string, size: number) => {
-    sendCommand('closePosition', { tokenId, size });
-  };
-
-  const handleToggleStrategy = (strategy: string, enabled: boolean) => {
-    sendCommand('toggleStrategy', { strategy, enabled });
-  };
-
-  const handleRedeemPosition = (conditionId: string) => {
-    sendCommand('redeemPosition', { conditionId });
-  };
-
-  // Backend semantics (v3.2): payload.enabled is the TARGET dryRun state,
-  // so toggling sends !isDryRun (true = stay/go dry-run, false = go LIVE).
-  const handleToggleDryRun = async () => {
+  const toggleMode = async () => {
     if (isDryRun) {
-      const confirmed = await confirmDialog({
-        title: 'Switch to LIVE trading?',
-        message: 'Real funds will be used. Ensure you have loaded your Private Key and understand the risks.',
-        confirmLabel: 'Go LIVE',
-        danger: true,
-      });
-      if (!confirmed) return;
+      const ok = await confirm({ title: 'Enable live trading?', message: 'This will allow real orders and use real funds. Verify every limit before continuing.', confirmLabel: 'Enable live mode', danger: true });
+      if (!ok) return;
     }
     sendCommand('toggleDryRun', { enabled: !isDryRun });
   };
 
-  const handleEmergencyStop = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Emergency Stop',
-      message: 'Halts all strategies immediately. The bot stays halted until you restart it.',
-      confirmLabel: '🛑 Halt everything',
-      danger: true,
-    });
-    if (confirmed) {
-      sendCommand('emergencyStop', {});
-    }
+  const emergencyStop = async () => {
+    const ok = await confirm({ title: 'Emergency stop', message: 'All strategy entries will be blocked until the process is restarted.', confirmLabel: 'Stop all strategies', danger: true });
+    if (ok) sendCommand('emergencyStop', {});
   };
 
-  const handlePanicSell = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Panic Sell',
-      message: 'This closes up to 10 open positions at market price. Real orders will be placed immediately — this cannot be undone.',
-      confirmLabel: '🚨 Sell everything',
-      danger: true,
-    });
-    if (confirmed) {
-      sendCommand('panicSell', {});
-    }
+  const panicSell = async () => {
+    const ok = await confirm({ title: 'Close open positions?', message: 'This submits market sell orders for up to 10 positions in live mode.', confirmLabel: 'Close positions', danger: true });
+    if (ok) sendCommand('panicSell', {});
   };
 
-  // History page
-  if (currentPage === 'history') {
-    return <HistoryPage onBack={() => setCurrentPage('dashboard')} />;
-  }
+  if (page === 'history') return <HistoryPage onBack={() => setPage('overview')} />;
+  if (page === 'positions') return <PositionsPage onBack={() => setPage('overview')} state={state} onClosePosition={(tokenId, size) => sendCommand('closePosition', { tokenId, size })} onRedeemPosition={(conditionId) => sendCommand('redeemPosition', { conditionId })} />;
 
-  // Positions page
-  if (currentPage === 'positions') {
-    return (
-      <PositionsPage
-        onBack={() => setCurrentPage('dashboard')}
-        state={state}
-        onClosePosition={handleClosePosition}
-        onRedeemPosition={handleRedeemPosition}
-      />
-    );
-  }
-
-  // Main dashboard - Compact trading-focused layout
   return (
-    <div className={`min-h-screen bg-poly-dark text-white ${isDryRun ? 'dry-run-breathing' : 'live-mode-breathing'}`}>
-      {/* Permanent-halt banner — an emergency-stopped bot must be unmistakable */}
-      {isHalted && (
-        <div className="bg-red-600/30 border-b border-red-500/50 px-4 py-2 text-center">
-          <span className="text-red-200 font-semibold text-sm">
-            🛑 BOT PERMANENTLY HALTED — all trading is blocked. Restart the bot to resume.
-          </span>
-        </div>
-      )}
-
-      {/* Mode Banner - Compact */}
-      <div className={`${isDryRun ? 'bg-red-500/20 border-red-500/30' : 'bg-green-500/20 border-green-500/30'} border-b px-4 py-1.5 text-center`}>
-        <span className={`${isDryRun ? 'text-red-400' : 'text-green-400'} font-medium text-xs flex items-center justify-center gap-2`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${isDryRun ? 'bg-red-400' : 'bg-green-400'} animate-pulse`} />
-          {isDryRun ? 'DRY RUN — No real trades' : 'LIVE — Real money trading'}
-        </span>
-      </div>
-
-      {/* Command failure feedback (e.g. emergency stop clicked while disconnected) */}
-      {commandError && (
-        <div className="bg-orange-500/20 border-b border-orange-500/40 px-4 py-1.5 text-center text-xs text-orange-300">
-          ⚠️ {commandError}
-        </div>
-      )}
-
-      {/* Connection Status */}
+    <div className={`app-shell ${isDryRun ? 'mode-sim' : 'mode-live'} ${halted ? 'is-halted' : ''}`}>
+      <div className="ambient ambient-one" /><div className="ambient ambient-two" />
+      <header className="product-bar">
+        <div className="brand-lockup"><div className="brand-mark">P</div><div><div className="brand-name">POLYMARKET <span>OPS</span></div><div className="brand-caption">AUTONOMOUS TRADING CONSOLE</div></div></div>
+        <div className="top-actions"><div className={`connection-pill ${connected ? 'online' : 'offline'}`}><i />{connected ? 'Engine online' : 'Engine offline'}</div><button className="ghost-button" onClick={() => setPage('history')}>History</button><button className="ghost-button" onClick={() => setPage('positions')}>Positions</button><button className={`mode-button ${isDryRun ? 'sim' : 'live'}`} onClick={toggleMode}>{isDryRun ? 'SIMULATION' : 'LIVE TRADING'} <span>↗</span></button></div>
+      </header>
       <ConnectionStatus connected={connected} error={error} />
+      {commandError && <div className="command-alert">⚠ {commandError}</div>}
+      {halted && <div className="halt-alert"><strong>EMERGENCY HALT</strong><span>All new entries are blocked. Restart the bot to resume.</span></div>}
 
-      {/* Header */}
-      <Header
-        state={state}
-        config={config}
-        connected={connected}
-        onHistoryClick={() => setCurrentPage('history')}
-        onPositionsClick={() => setCurrentPage('positions')}
-        onToggleDryRun={handleToggleDryRun}
-      />
+      <main className="workspace">
+        <section className="hero-row"><div><div className="eyebrow">CONTROL CENTER / {isDryRun ? 'PAPER ENVIRONMENT' : 'PRODUCTION ENVIRONMENT'}</div><h1>Trading at a glance.</h1><p>One surface for signals, exposure, execution and risk.</p></div><div className="hero-status"><span className="pulse-dot" />{state?.isPaused ? 'Paused by risk guard' : halted ? 'Halted' : 'Monitoring markets'}<small>{state?.activeArbMarket || state?.activeDipArbMarket || 'Waiting for active opportunity'}</small></div></section>
 
-      <main className="p-4 space-y-4 max-w-[1800px] mx-auto">
-        {/* Row 1: Quick Stats + Balances side by side */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <QuickStats state={state} config={config} />
-          <BalanceCards state={state} config={config} />
-        </div>
+        <section className="metric-strip">
+          <div className="metric"><span>SESSION P&L</span><strong className={pnl >= 0 ? 'positive' : 'negative'}>{formatUsd(pnl)}</strong><small>Realized performance</small></div>
+          <div className="metric"><span>EXPOSURE</span><strong>${exposure.toFixed(2)} <em>/ ${exposureCap.toFixed(2)}</em></strong><div className="meter"><i style={{ width: `${exposureCap ? Math.min(100, exposure / exposureCap * 100) : 0}%` }} /></div></div>
+          <div className="metric"><span>WIN RATE</span><strong>{winRate.toFixed(1)}%</strong><small>{state?.tradesExecuted ?? 0} executions recorded</small></div>
+          <div className="metric"><span>RISK STATUS</span><strong className={state?.isPaused || halted ? 'warning' : 'positive'}>{halted ? 'HALTED' : state?.isPaused ? 'PAUSED' : 'WITHIN LIMITS'}</strong><small>{state?.consecutiveLosses ?? 0} consecutive losses</small></div>
+        </section>
 
-        {/* Row 2: Main Trading Grid - 4 columns */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          <DipArbPanel state={state} />
-          <ArbitragePanel state={state} />
-          <PnLPanel state={state} config={config} />
-          <SessionSummary state={state} />
-        </div>
+        <div className="section-label"><span>01</span> LIVE OVERVIEW <i /></div>
+        <section className="dashboard-grid top-grid"><div className="panel-span-2"><QuickStats state={state} config={config} /></div><BalanceCards state={state} config={config} /><PnLPanel state={state} config={config} /></section>
+        <section className="dashboard-grid strategy-grid"><DipArbPanel state={state} /><ArbitragePanel state={state} /><div className="panel-span-2"><SmartMoneyPanel state={state} /></div></section>
 
-        {/* Row 2.5: Risk Status */}
-        <RiskPanel state={state} config={config} />
+        <div className="section-label"><span>02</span> RISK & EXECUTION <i /></div>
+        <section className="dashboard-grid lower-grid"><div className="panel-span-2"><RiskPanel state={state} config={config} /></div><StrategyControls config={config} onToggle={toggleStrategy} onEmergencyStop={emergencyStop} onPanicSell={panicSell} halted={halted} /><TrendIndicators state={state} /><SessionSummary state={state} /><OnChainStats state={state} /></section>
 
-        {/* Row 3: Smart Money (main) + Side Panel (Trends + Strategies + OnChain) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <SmartMoneyPanel state={state} />
-          </div>
-          <div className="space-y-3">
-            <StrategyControls
-              config={config}
-              onToggle={handleToggleStrategy}
-              onEmergencyStop={handleEmergencyStop}
-              onPanicSell={handlePanicSell}
-              halted={isHalted}
-            />
-            <TrendIndicators state={state} />
-            <StrategyGrid state={state} config={config} />
-            <OnChainStats state={state} />
-          </div>
-        </div>
-
-        {/* Row 4: Activity Log - Full Width at bottom */}
-        <ActivityLog logs={logs} />
-
-        {/* Config - Collapsible at bottom */}
-        <details className="group">
-          <summary className="cursor-pointer text-gray-500 text-sm hover:text-gray-400 flex items-center gap-2 py-2">
-            <span className="transition-transform group-open:rotate-90">▶</span>
-            Advanced Configuration
-          </summary>
-          <div className="mt-2">
-            <ConfigPanel config={config} />
-          </div>
-        </details>
+        <div className="section-label"><span>03</span> OPERATIONS <i /></div>
+        <section className="dashboard-grid ops-grid"><div className="panel-span-2"><ActivityLog logs={logs} /></div><StrategyGrid state={state} config={config} /></section>
+        <details className="advanced"><summary>Advanced configuration <span>⌄</span></summary><ConfigPanel config={config} /></details>
       </main>
-
-      {/* Minimal Footer */}
-      <footer className="text-center py-3 border-t border-white/5 text-gray-600 text-xs">
-        <div className="flex flex-col gap-1">
-          <div>Polymarket Bot v3.2 • {connected ? '🟢 Connected' : '🔴 Disconnected'}</div>
-          <div>
-            Created by <a href="https://x.com/Mr_CryptoYT" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 transition-colors">@Mr_CryptoYT</a>
-          </div>
-        </div>
-      </footer>
-
-      {/* Confirmation dialog */}
-      {confirmState && (
-        <ConfirmModal
-          config={confirmState}
-          onResolve={(confirmed) => {
-            confirmState.resolve(confirmed);
-            setConfirmState(null);
-          }}
-        />
-      )}
+      <footer className="product-footer"><span>POLYMARKET OPS · v3.2</span><span>Risk controls are active · {connected ? 'Live telemetry connected' : 'Waiting for engine'}</span></footer>
+      {confirmState && <ConfirmModal config={confirmState} onResolve={(value) => { confirmState.resolve(value); setConfirmState(null); }} />}
     </div>
   );
 }
