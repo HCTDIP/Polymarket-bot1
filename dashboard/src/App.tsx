@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import {
-  Header, BalanceCards, PnLPanel, RiskPanel, TrendIndicators, StrategyGrid,
+  BalanceCards, PnLPanel, RiskPanel, TrendIndicators, StrategyGrid,
   OnChainStats, ActivityLog, ConfigPanel, ConnectionStatus, ConfirmModal,
   DipArbPanel, ArbitragePanel, SmartMoneyPanel, QuickStats, SessionSummary,
   HistoryPage, PositionsPage, StrategyControls, type ConfirmConfig,
@@ -62,24 +62,14 @@ function App() {
       <ConnectionStatus connected={connected} error={error} />
       {commandError && <div className="command-alert">⚠ {commandError}</div>}
       {halted && <div className="halt-alert"><strong>EMERGENCY HALT</strong><span>All new entries are blocked. Restart the bot to resume.</span></div>}
-
       <main className="workspace">
         <section className="hero-row"><div><div className="eyebrow">CONTROL CENTER / {isDryRun ? 'PAPER ENVIRONMENT' : 'PRODUCTION ENVIRONMENT'}</div><h1>Trading at a glance.</h1><p>One surface for signals, exposure, execution and risk.</p></div><div className="hero-status"><span className="pulse-dot" />{state?.isPaused ? 'Paused by risk guard' : halted ? 'Halted' : 'Monitoring markets'}<small>{state?.activeArbMarket || state?.activeDipArbMarket || 'Waiting for active opportunity'}</small></div></section>
-
-        <section className="metric-strip">
-          <div className="metric"><span>SESSION P&L</span><strong className={pnl >= 0 ? 'positive' : 'negative'}>{formatUsd(pnl)}</strong><small>Realized performance</small></div>
-          <div className="metric"><span>EXPOSURE</span><strong>${exposure.toFixed(2)} <em>/ ${exposureCap.toFixed(2)}</em></strong><div className="meter"><i style={{ width: `${exposureCap ? Math.min(100, exposure / exposureCap * 100) : 0}%` }} /></div></div>
-          <div className="metric"><span>WIN RATE</span><strong>{winRate.toFixed(1)}%</strong><small>{state?.tradesExecuted ?? 0} executions recorded</small></div>
-          <div className="metric"><span>RISK STATUS</span><strong className={state?.isPaused || halted ? 'warning' : 'positive'}>{halted ? 'HALTED' : state?.isPaused ? 'PAUSED' : 'WITHIN LIMITS'}</strong><small>{state?.consecutiveLosses ?? 0} consecutive losses</small></div>
-        </section>
-
+        <section className="metric-strip"><div className="metric"><span>SESSION P&amp;L</span><strong className={pnl >= 0 ? 'positive' : 'negative'}>{formatUsd(pnl)}</strong><small>Realized performance</small></div><div className="metric"><span>EXPOSURE</span><strong>${exposure.toFixed(2)} <em>/ ${exposureCap.toFixed(2)}</em></strong><div className="meter"><i style={{ width: `${exposureCap ? Math.min(100, exposure / exposureCap * 100) : 0}%` }} /></div></div><div className="metric"><span>WIN RATE</span><strong>{winRate.toFixed(1)}%</strong><small>{state?.tradesExecuted ?? 0} executions recorded</small></div><div className="metric"><span>RISK STATUS</span><strong className={state?.isPaused || halted ? 'warning' : 'positive'}>{halted ? 'HALTED' : state?.isPaused ? 'PAUSED' : 'WITHIN LIMITS'}</strong><small>{state?.consecutiveLosses ?? 0} consecutive losses</small></div></section>
         <div className="section-label"><span>01</span> LIVE OVERVIEW <i /></div>
         <section className="dashboard-grid top-grid"><div className="panel-span-2"><QuickStats state={state} config={config} /></div><BalanceCards state={state} config={config} /><PnLPanel state={state} config={config} /></section>
         <section className="dashboard-grid strategy-grid"><DipArbPanel state={state} /><ArbitragePanel state={state} /><div className="panel-span-2"><SmartMoneyPanel state={state} /></div></section>
-
-        <div className="section-label"><span>02</span> RISK & EXECUTION <i /></div>
+        <div className="section-label"><span>02</span> RISK &amp; EXECUTION <i /></div>
         <section className="dashboard-grid lower-grid"><div className="panel-span-2"><RiskPanel state={state} config={config} /></div><StrategyControls config={config} onToggle={toggleStrategy} onEmergencyStop={emergencyStop} onPanicSell={panicSell} halted={halted} /><TrendIndicators state={state} /><SessionSummary state={state} /><OnChainStats state={state} /></section>
-
         <div className="section-label"><span>03</span> OPERATIONS <i /></div>
         <section className="dashboard-grid ops-grid"><div className="panel-span-2"><ActivityLog logs={logs} /></div><StrategyGrid state={state} config={config} /></section>
         <details className="advanced"><summary>Advanced configuration <span>⌄</span></summary><ConfigPanel config={config} /></details>
